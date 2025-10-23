@@ -98,108 +98,174 @@
             </h3>
         </div>
     </div>
-
+    <!-- Add after the existing button -->
+    <div style="margin: 10px 0;">
+        <button onclick="checkStock()">Check Halal List</button>
+        <button onclick="checkT0Stock()" style="background-color: #047857;">Check T0 List</button>
+    </div>
+    <div id="result"></div>
+    <div id="t0result"></div>
     <div
         style="display:inline-block; background:rgba(255,255,255,0.85); border-radius:12px; padding:16px 24px; box-shadow:0 2px 12px rgba(0,0,0,0.12); margin-top:16px;">
         <p>Type any company name or ticker below:</p>
     </div>
+
     <div style="position: relative;">
         <input type="text" id="searchInput" placeholder="e.g. ABB, Aarti Drugs" />
         <div id="autocomplete-list" class="autocomplete-items"></div>
     </div>
-    <button onclick="checkStock()">Check</button>
-    <div id="result"></div>
 
     <script>
+        // Stock lists
         let halalList = [];
-
-        // Load Excel file
-        fetch('halal_list.csv')
-            .then(response => response.arrayBuffer())
-            .then(data => {
+        let halalT0List = [];
+        
+        // Helper function to load CSV data
+        async function loadStockData(filename) {
+            try {
+                const response = await fetch(filename);
+                const data = await response.arrayBuffer();
                 const workbook = XLSX.read(data, { type: 'array' });
-                const sheetName = workbook.SheetNames[0];
-                const sheet = workbook.Sheets[sheetName];
-                const json = XLSX.utils.sheet_to_json(sheet);
-                halalList = json.map(row => ({
-                    name: row["Company Name"].toString(),
-                    ticker: row["Ticker"].toString()
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                return XLSX.utils.sheet_to_json(sheet).map(row => ({
+                    name: row["Company Name"].toString().trim(),
+                    ticker: row["Ticker"].toString().trim()
                 }));
-                console.log("✅ Loaded", halalList.length, "stocks from Excel");
-            })
-            .catch(err => console.error("Error loading Excel file:", err));
+            } catch (err) {
+                console.error(`Error loading ${filename}:`, err);
+                return [];
+            }
+        }
 
+        // Load both lists in parallel
+        Promise.all([
+            loadStockData('halal_list.csv'),
+            loadStockData('intraday_stocks.csv')
+        ]).then(([halal, t0]) => {
+            halalList = halal;
+            halalT0List = t0;
+            console.log("✅ Loaded", halalList.length, "halal stocks and", halalT0List.length, "T0 stocks");
+        });
+
+        // DOM elements
         const searchInput = document.getElementById('searchInput');
         const autocompleteList = document.getElementById('autocomplete-list');
+        
+        // Debounce function for search optimization
+        function debounce(func, wait) {
+            let timeout;
+            return function (...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), wait);
+            };
+        }
 
-        searchInput.addEventListener('input', function () {
-            const val = this.value.toLowerCase();
+        // Search and filter stocks
+        function searchStocks(query) {
+            if (!query) return [];
+            query = query.toLowerCase();
+            
+            // Combine both lists and remove duplicates
+            const allStocks = [...halalList, ...halalT0List];
+            const uniqueStocks = Array.from(new Set(allStocks.map(JSON.stringify))).map(JSON.parse);
+            
+            return uniqueStocks
+                .filter(s => 
+                    s.name.toLowerCase().includes(query) || 
+                    s.ticker.toLowerCase().includes(query)
+                )
+                .slice(0, 10);
+        }
+
+        // Update autocomplete list
+        const updateAutocomplete = debounce(function(value) {
             autocompleteList.innerHTML = '';
+            if (!value) return;
 
-            if (!val) return;
-
-            const matches = halalList.filter(
-                s => s.name.toLowerCase().includes(val) || s.ticker.toLowerCase().includes(val)
-            ).slice(0, 10); // Limit suggestions to 10
-
+            const matches = searchStocks(value);
             matches.forEach(match => {
                 const item = document.createElement('div');
                 item.innerHTML = `<strong>${match.name}</strong> (${match.ticker})`;
-                item.addEventListener('click', function () {
-                    searchInput.value = match.name;
+                item.addEventListener('click', () => {
+                    searchInput.value = match.ticker;
                     autocompleteList.innerHTML = '';
                 });
                 autocompleteList.appendChild(item);
             });
-        });
+        }, 300);
 
-        document.addEventListener('click', function (e) {
+        // Event listeners
+        searchInput.addEventListener('input', e => updateAutocomplete(e.target.value));
+
+        // Close autocomplete on outside click
+        document.addEventListener('click', e => {
             if (e.target !== searchInput) autocompleteList.innerHTML = '';
         });
 
-        function checkStock() {
-            const query = searchInput.value.trim().toLowerCase();
-            const resultDiv = document.getElementById('result');
-
+        // Helper function to check stock in a list
+        function checkStockInList(list, query, resultDiv, listName) {
             if (!query) {
                 resultDiv.innerHTML = '⚠️ Please enter a company name or ticker.';
                 resultDiv.style.color = '#ca8a04';
                 return;
             }
 
-            const found = halalList.some(
-                s => s.name.toLowerCase() === query || s.ticker.toLowerCase() === query
+            query = query.toLowerCase().trim();
+            
+            // First try exact ticker match
+            const foundByTicker = list.some(s => s.ticker.toLowerCase().trim() === query);
+            
+            // Then try exact name match
+            const foundByExactName = !foundByTicker && list.some(s => s.name.toLowerCase().trim() === query);
+            
+            // Finally try partial matches
+            const foundByPartialMatch = !foundByTicker && !foundByExactName && list.some(
+                s => s.name.toLowerCase().includes(query) || s.ticker.toLowerCase().includes(query)
             );
 
+            const found = foundByTicker || foundByExactName || foundByPartialMatch;
+
+            resultDiv.style.backgroundColor = 'white';
             if (found) {
-                resultDiv.innerHTML = '✅ This stock is <b>HALAL</b>';
+                resultDiv.innerHTML = `✅ This stock is in <b>${listName}</b>`;
                 resultDiv.style.color = 'green';
-                resultDiv.style.backgroundColor = 'white';
             } else {
-                resultDiv.innerHTML = '❌ This stock Not Found in the list <b>NOT HALAL</b>';
+                resultDiv.innerHTML = `❌ This stock Not Found in <b>${listName}</b>`;
                 resultDiv.style.color = 'red';
-                resultDiv.style.backgroundColor = 'white';
             }
         }
+
+        // Check functions
+        function checkStock() {
+            const query = searchInput.value;
+            checkStockInList(halalList, query, document.getElementById('result'), 'HALAL LIST');
+        }
+
+        function checkT0Stock() {
+            const query = searchInput.value;
+            checkStockInList(halalT0List, query, document.getElementById('t0result'), 'T0 LIST');
+        }
+
     </script>
     <div
         style="display:inline-block; background:rgba(255,255,255,0.85); border-radius:12px; padding:16px 24px; box-shadow:0 2px 12px rgba(0,0,0,0.12); margin-top:16px;">
         <p style="color:#1a3a32; margin-bottom:8px;">
-            The above data is fetched from
-            <a href="https://zamzam-capital.com/halal-stocks/" target="_blank" style="color:#1a3a32;">Zamzam Capital</a> website.
+            Disclaimer :- The above data is fetched from
+            <a href="https://zamzam-capital.com/halal-stocks/" target="_blank" style="color:#1a3a32;">Zamzam Capital</a>
+            website.
             If you want to know how they purify it, please visit their website for more details.
         </p>
         <p style="color:#1a3a32;">
             The list was last updated on April 26, 2025.
         </p>
     </div>
-        <div
+    <div
         style="display:inline-block; background:rgba(255,255,255,0.85); border-radius:12px; padding:16px 24px; box-shadow:0 2px 12px rgba(0,0,0,0.12); margin-top:16px;">
-<p style="color: #000000; margin-top: 30px; font-size: 14px; text-align: center;">
-  Developed with ❤️ by
-  <a href="https://www.instagram.com/halalfinancesimplified/" target="_blank"
-     style="color: #000000; text-decoration: none; font-weight: bold;">Halal Finance Simplified</a>
-</p>
+        <p style="color: #000000; margin-top: 30px; font-size: 14px; text-align: center;">
+            Developed with ❤️ by
+            <a href="https://www.instagram.com/halalfinancesimplified/" target="_blank"
+                style="color: #000000; text-decoration: none; font-weight: bold;">Halal Finance Simplified</a>
+        </p>
     </div>
 
 </body>

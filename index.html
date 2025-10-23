@@ -101,7 +101,7 @@
     <!-- Add after the existing button -->
     <div style="margin: 10px 0;">
         <button onclick="checkStock()">Check Halal List</button>
-        <button onclick="checkT0Stock()" style="background-color: #047857;">Check T0 List</button>
+        <button onclick="checkT0Stock()" style="background-color: #047857;">Check Intraday Stock List (T+0) </button>
     </div>
     <div id="result"></div>
     <div id="t0result"></div>
@@ -243,7 +243,7 @@
 
         function checkT0Stock() {
             const query = searchInput.value;
-            checkStockInList(halalT0List, query, document.getElementById('t0result'), 'T0 LIST');
+            checkStockInList(halalT0List, query, document.getElementById('t0result'), 'Intraday Stock (T+0) Settlement list');
         }
 
     </script>
